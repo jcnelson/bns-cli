@@ -1,0 +1,446 @@
+#!/usr/bin/env node
+
+// disable @stacks logging, since we need to collect stdout
+const stacksCommon = require("@stacks/common");
+let stacksConfig = stacksCommon.config;
+stacksConfig.logLevel = "none";
+
+const stacksAuth = require("@stacks/auth");
+const stacksStorage = require("@stacks/storage");
+
+const fs = require("node:fs");
+const Path = require("node:path");
+
+const UserSession = stacksAuth.UserSession;
+const AppConfig = stacksAuth.AppConfig;
+const Storage = stacksStorage.Storage;
+
+let DEBUG = true;
+const DEFAULT_HUB = "https://hub.blockstack.org"
+
+function debug(msg) {
+  if (DEBUG) {
+    console.error(msg);
+  }
+}
+
+
+// argv: string[]: list of arguments to parse
+// opts: string: getopt(3)-style short options
+// longOpts: object: long option names keyed to short option characters in opts
+function getCLIOpts(argv, opts, longOpts) {
+  const optsTable = {};
+  const remainingArgv = [];
+  const argvBuff = argv.slice(0);
+
+  for (let i = 0; i < opts.length; i++) {
+    if (opts[i] == ':') {
+      continue;
+    }
+    if (i + 1 < opts.length && opts[i + 1] === ':') {
+      optsTable[opts[i]] = null;
+    } else {
+      optsTable[opts[i]] = false;
+    }
+  }
+
+  for (const opt of Object.keys(optsTable)) {
+    for (let i = 0; i < argvBuff.length; i++) {
+      if (argvBuff[i] === null) {
+        break;
+      }
+      if (argvBuff[i] === '--') {
+        break;
+      }
+
+      const argvOpt = `-${opt}`;
+      const longOptName = longOpts[opt] !== undefined ? longOpts[opt] : '';
+      const longOpt = `--${longOpts[longOptName]}`;
+      if (argvOpt === argvBuff[i] || longOpt === argvBuff[i]) {
+        if (optsTable[opt] === false) {
+          // boolean switch
+          optsTable[opt] = true;
+          argvBuff[i] = '';
+        } else {
+          // argument
+          optsTable[opt] = argvBuff[i + 1];
+          argvBuff[i] = '';
+          argvBuff[i + 1] = '';
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < argvBuff.length; i++) {
+    if (argvBuff[i].length > 0) {
+      if (argvBuff[i] === '--') {
+        continue;
+      }
+      remainingArgv.push(argvBuff[i]);
+    }
+  }
+
+  optsTable['_'] = remainingArgv;
+  return optsTable;
+}
+
+// Print usage for putfiles and exit
+function usagePutFiles() {
+  console.error(
+    `Usage: ${process.argv[1]} putfiles [options] path [path...]\n` +
+    `Where [options] are:\n` +
+    '   -k, --privkey           (required) Hex-encoded private key. If - is passed, it will be read from stdin.\n' +
+    `   -h, --hub               Gaia hub write URL. Defaults to ${DEFAULT_HUB}\n` +
+    '   -p, --no-encrypt        Do not encrypt the files\n' +
+    '   -s, --no-sign           Do not sign the files.  Requires -p, --no-encrypt.' 
+  );
+  process.exit(1);
+}
+
+// Print usage for listfiles and exit
+function usageListFiles() {
+  console.error(
+    `Usage: ${process.argv[1]} listfiles [options]\n` +
+    `Where [options] are:\n` +
+    '   -k, --privkey           (required) Hex-encoded private key. If - is passed, it will be read from stdin.\n' +
+    `   -h, --hub               Gaia hub write URL. Defaults to ${DEFAULT_HUB}`
+  );
+  process.exit(1);
+}
+
+// Print usage for deletefiles and exit
+function usageDeleteFiles() {
+  console.error(
+    `Usage: ${process.argv[1]} deletefiles [options] name [name...] \n` +
+    `Where [options] are:\n` +
+    '   -k, --privkey           (required) Hex-encoded private key. If - is passed, it will be read from stdin.\n' +
+    `   -h, --hub               Gaia hub write URL. Defaults to ${DEFAULT_HUB}`
+  );
+  process.exit(1);
+}
+
+// Print usage for getfiles and exit
+function usageGetFiles() {
+  console.error(
+    `Usage: ${process.argv[1]} getfiles [options] name path [name path...]\n` +
+    `Where [options] are:\n` +
+    '   -k, --privkey           (optional) Hex-encoded private key. If - is passed, it will be read from stdin.\n' +
+    '                           If not given, encrypted files will be returned as-is.\n' +
+    `   -h, --hub               Gaia hub write URL. Defaults to ${DEFAULT_HUB}\n` +
+    '   -p, --not-encrypted     File is plaintext, so do not try to decrypt it.\n' +
+    '   -q, --quiet             Do not print a report (use with a `path` of -)\n' +
+    '   -s, --not-signed        File is not signed, so do not try to verify it.\n' +
+    'If `path` is -, then the file is written to stdout. At most one path may be -.'
+  );
+  process.exit(1);
+}
+
+// Print subcommand usage
+function usageSubcommands() {
+  console.error(
+    `Usage: ${process.argv[1]} subcommand [options] args...\n` +
+    `Where \`subcommand\` is any of the following:\n` +
+    `   getfiles                Download files from the Gaia hub.\n` +
+    `   putfiles                Upload files to the Gaia hub.\n` +
+    `   listfiles               List files in the Gaia hub.\n` +
+    `   deletefiles             Delete files in the Gaia hub.\n` +
+    `   help                    Print this message.\n` +
+    `For detailed subcommand usage, run \`${process.argv[1]} help subcommand\``
+  );
+  process.exit(1);
+}
+
+function getPrivateKey(privkey) {
+  if (privkey === '-') {
+    const privkey = fs.readFileSync(0, { encoding: 'utf8' });
+    return privkey;
+  }
+  else {
+    return privkey;
+  }
+}
+
+function makeStorage(privateKey, hubUrl) {
+  const appConfig = new AppConfig();
+  const userSession = new UserSession({ appConfig });
+  userSession.store.getSessionData().userData = {
+    appPrivateKey: privateKey,
+    hubUrl: hubUrl
+  };
+
+  const storage = new Storage({ userSession });
+  return storage;
+}
+
+// Stores a list of files
+async function putFiles(argv) {
+  const opts = getCLIOpts(argv, "k:h:ps", {
+    "k": "privkey",
+    "h": "hub",
+    "p": "no-encrypt",
+    "s": "no-sign"
+  });
+
+  if (opts['k'] === null) {
+    usagePutFiles();
+  }
+  if (opts['h'] === null) {
+    opts['h'] = DEFAULT_HUB;
+  }
+
+  const privateKey = getPrivateKey(opts['k']);
+  const hubUrl = opts['h'];
+  const encrypt = !opts['p'];
+  const sign = !opts['s'];
+  const fileNames = opts['_'];
+
+  const storage = makeStorage(privateKey, hubUrl);
+  const putFileOpts = {
+    encrypt: encrypt,
+    sign: sign
+  };
+  
+  let urls = [];
+  for(const fileName of fileNames) {
+    const fileData = fs.readFileSync(fileName, { flag: 'r' });
+    const fileUrl = await storage.putFile(fileName, fileData, putFileOpts);
+    urls.push(fileUrl);
+  }
+
+  const res = {
+    "urls": urls
+  };
+
+  return res;
+}
+
+// Lists files
+async function listFiles(argv) {
+  const opts = getCLIOpts(argv, "k:h:", {
+    "k": "privkey",
+    "h": "hub",
+  });
+  
+  if (opts['k'] === null) {
+    usageListFiles();
+  }
+  if (opts['h'] === null) {
+    opts['h'] = DEFAULT_HUB;
+  }
+
+  const privateKey = getPrivateKey(opts['k']);
+  const hubUrl = opts['h'];
+  
+  const storage = makeStorage(privateKey, hubUrl);
+
+  let names = [];
+  await storage.listFiles((filename) => {
+    names.push(filename);
+    return true;
+  });
+
+  const res = {
+    "names": names
+  };
+
+  return res;
+}
+
+// Delete files
+async function deleteFiles(argv) {
+  const opts = getCLIOpts(argv, "k:h:", {
+    "k": "privkey",
+    "h": "hub",
+  });
+  
+  if (opts['k'] === null) {
+    usageDeleteFiles();
+  }
+  if (opts['h'] === null) {
+    opts['h'] = DEFAULT_HUB;
+  }
+
+  const privateKey = getPrivateKey(opts['k']);
+  const hubUrl = opts['h'];
+  const names = opts['_'];
+  
+  const storage = makeStorage(privateKey, hubUrl);
+
+  for (const name of names) {
+    try {
+      await storage.deleteFile(name, { wasSigned: true });
+    }
+    catch(e) {
+      const hubError = e.hubError;
+      if (hubError !== undefined) {
+        if (hubError.statusCode === 404) {
+          // absorb "Not found"
+          continue;
+        }
+      }
+      throw e;
+    }
+  }
+
+  const res = {
+    "names": names
+  };
+
+  return res;
+}
+
+// Get files
+async function getFiles(argv) {
+  const opts = getCLIOpts(argv, "k:h:psq", {
+    "k": "privkey",
+    "h": "hub",
+    "p": "not-encrypted",
+    "s": "not-signed",
+    "q": "quiet"
+  });
+
+  if (opts['k'] === null) {
+    usageGetFiles();
+  }
+  if (opts['h'] === null) {
+    opts['h'] = DEFAULT_HUB;
+  }
+
+  const privateKey = getPrivateKey(opts['k']);
+  const hubUrl = opts['h'];
+  const decrypt = !opts['p'];
+  const verify = !opts['s'];
+  let quiet = opts['q'];
+
+  const names_and_paths = opts['_'];
+
+  if (names_and_paths.length % 2 != 0) {
+    usageGetFiles(argv);
+  }
+
+  let names = [];
+  let paths = [];
+  let haveStdin = false;
+  for (let i = 0; i < names_and_paths.length; i += 2) {
+    const name = names_and_paths[i];
+    const path = names_and_paths[i+1];
+    if (path === '-') {
+      if (haveStdin) {
+        usageGetFiles(argv);
+      }
+      haveStdin = true;
+    }
+    names.push(name);
+    paths.push(path);
+  }
+
+  if (haveStdin) {
+    // default to quiet so we don't corrupt the stdout stream
+    quiet = true;
+  }
+ 
+  const storage = makeStorage(privateKey, hubUrl);
+  const getFileOpts = {
+    decrypt: decrypt,
+    verify: verify,
+  };
+
+  let received = [];
+  let received_paths = [];
+
+  for(let i = 0; i < names.length; i++) {
+    const name = names[i];
+    const path = paths[i];
+    const data = await storage.getFile(name, getFileOpts);
+    if (data === undefined) {
+      continue;
+    }
+
+    if (path == '-') {
+      // send to stdout
+      if (data instanceof ArrayBuffer) {
+        fs.writeFileSync(1, Buffer.from(new Uint8Array(data)));
+      }
+      else {
+        fs.writeFileSync(1, data);
+      }
+    }
+    else {
+      // store to path
+      const dirname = Path.dirname(path);
+      if (!fs.statSync(dirname)) {
+        fs.mkdirSync(dirname, { recursive: true });
+      }
+
+      fs.writeFileSync(path, data);
+    }
+
+    received.push(name);
+    received_paths.push(path);
+  }
+
+  if (quiet) {
+    // print nothing
+    return undefined;
+  }
+
+  let inner = [];
+  for (let i = 0; i < received.length; i++) {
+    inner.push({
+      "name": received[i],
+      "path": received_paths[i],
+    });
+  }
+
+  const res = {
+    received: inner
+  };
+
+  return res;
+}
+
+function doHelp(subcommand) {
+  if (subcommand === "putfiles") {
+    usagePutFiles();
+  }
+  else if (subcommand === "listfiles") {
+    usageListFiles();
+  }
+  else if (subcommand === "deletefiles") {
+    usageDeleteFiles();
+  }
+  else if (subcommand === "getfiles") {
+    usageGetFiles();
+  }
+  else {
+    usageSubcommands();
+  }
+}
+
+async function main() {
+  const argv = process.argv.slice(1);
+  const subcommand = argv[1];
+  if (subcommand === "putfiles") {
+    const res = await putFiles(argv.slice(2));
+    console.log(JSON.stringify(res));
+  }
+  else if (subcommand === "listfiles") {
+    const res = await listFiles(argv.slice(2));
+    console.log(JSON.stringify(res));
+  }
+  else if (subcommand === "deletefiles") {
+    const res = await deleteFiles(argv.slice(2));
+    console.log(JSON.stringify(res));
+  }
+  else if (subcommand == "getfiles") {
+    const res = await getFiles(argv.slice(2));
+    if (res !== undefined) {
+      console.log(JSON.stringify(res));
+    }
+  }
+  else if (subcommand == "help") {
+    doHelp(argv[2]);
+  }
+}
+
+main()
