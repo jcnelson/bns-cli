@@ -124,9 +124,23 @@ function usageGetFiles() {
   console.error(
     `Usage: ${process.argv[1]} getfiles [options] name path [name path...]\n` +
     `Where [options] are:\n` +
-    '   -k, --privkey           (optional) Hex-encoded private key. If - is passed, it will be read from stdin.\n' +
-    '                           If not given, encrypted files will be returned as-is.\n' +
+    '   -k, --privkey           Hex-encoded private key. If - is passed, it will be read from stdin.\n' +
     `   -h, --hub               Gaia hub write URL. Defaults to ${DEFAULT_HUB}\n` +
+    '   -p, --not-encrypted     File is plaintext, so do not try to decrypt it.\n' +
+    '   -q, --quiet             Do not print a report (use with a `path` of -)\n' +
+    '   -s, --not-signed        File is not signed, so do not try to verify it.\n' +
+    'If `path` is -, then the file is written to stdout. At most one path may be -.'
+  );
+  process.exit(1);
+}
+
+// Print usage for getpubfiles
+function usageGetPublicFiles() {
+  console.error(
+    `Usage: ${process.argv[1]} getpubfiles [options] name path [name path...]\n` +
+    `Where [options] are:\n` +
+    '   -a, --app-url           URL to the application.\n' +
+    '   -b, --bns-name          BNS name of the file creator.\n' +
     '   -p, --not-encrypted     File is plaintext, so do not try to decrypt it.\n' +
     '   -q, --quiet             Do not print a report (use with a `path` of -)\n' +
     '   -s, --not-signed        File is not signed, so do not try to verify it.\n' +
@@ -289,33 +303,10 @@ async function deleteFiles(argv) {
   return res;
 }
 
-// Get files
-async function getFiles(argv) {
-  const opts = getCLIOpts(argv, "k:h:psq", {
-    "k": "privkey",
-    "h": "hub",
-    "p": "not-encrypted",
-    "s": "not-signed",
-    "q": "quiet"
-  });
-
-  if (opts['k'] === null) {
-    usageGetFiles();
-  }
-  if (opts['h'] === null) {
-    opts['h'] = DEFAULT_HUB;
-  }
-
-  const privateKey = getPrivateKey(opts['k']);
-  const hubUrl = opts['h'];
-  const decrypt = !opts['p'];
-  const verify = !opts['s'];
-  let quiet = opts['q'];
-
-  const names_and_paths = opts['_'];
-
+// Inner get files
+async function innerGetFiles(argv, storage, names_and_paths, getFileOpts, usage) {
   if (names_and_paths.length % 2 != 0) {
-    usageGetFiles(argv);
+    usage(argv);
   }
 
   let names = [];
@@ -326,7 +317,7 @@ async function getFiles(argv) {
     const path = names_and_paths[i+1];
     if (path === '-') {
       if (haveStdin) {
-        usageGetFiles(argv);
+        usage(argv);
       }
       haveStdin = true;
     }
@@ -338,12 +329,6 @@ async function getFiles(argv) {
     // default to quiet so we don't corrupt the stdout stream
     quiet = true;
   }
- 
-  const storage = makeStorage(privateKey, hubUrl);
-  const getFileOpts = {
-    decrypt: decrypt,
-    verify: verify,
-  };
 
   let received = [];
   let received_paths = [];
@@ -399,6 +384,74 @@ async function getFiles(argv) {
   return res;
 }
 
+// Get files
+async function getFiles(argv) {
+  const opts = getCLIOpts(argv, "k:h:psq", {
+    "k": "privkey",
+    "h": "hub",
+    "p": "not-encrypted",
+    "s": "not-signed",
+    "q": "quiet"
+  });
+
+  if (opts['k'] === null) {
+    usageGetFiles();
+  }
+  if (opts['h'] === null) {
+    opts['h'] = DEFAULT_HUB;
+  }
+
+  const privateKey = getPrivateKey(opts['k']);
+  const hubUrl = opts['h'];
+  const decrypt = !opts['p'];
+  const verify = !opts['s'];
+  let quiet = opts['q'];
+
+  const names_and_paths = opts['_'];
+  
+  const storage = makeStorage(privateKey, hubUrl);
+  const getFileOpts = {
+    decrypt: decrypt,
+    verify: verify,
+  };
+
+  return innerGetFiles(argv, storage, names_and_paths, getFileOpts, usageGetFiles);
+}
+
+// Get public files
+async function getPublicFiles(argv) {
+  const opts = getCLIOpts(argv, "a:b:psq", {
+    "b": "bns-name",
+    "a": "app-url",
+    "p": "not-encrypted",
+    "s": "not-signed",
+    "q": "quiet"
+  });
+
+  if (opts['b'] === null || opts['a'] === null) {
+    usageGetPublicFiles();
+  }
+
+  const username = opts['b'];
+  const app_url = opts['a'];
+  const decrypt = !opts['p'];
+  const verify = !opts['s'];
+  let quiet = opts['q'];
+
+  const names_and_paths = opts['_'];
+  
+  const fakePrivateKey = '24fd0d173db8ecaaefa3c8f589cf49fe72bc4ec54fc1bdc84023eac69d7ccc0b';
+  const storage = makeStorage(fakePrivateKey, DEFAULT_HUB);
+  const getFileOpts = {
+    username: username,
+    app: app_url,
+    decrypt: decrypt,
+    verify: verify,
+  };
+  
+  return innerGetFiles(argv, storage, names_and_paths, getFileOpts, usageGetPublicFiles);
+}
+
 function doHelp(subcommand) {
   if (subcommand === "putfiles") {
     usagePutFiles();
@@ -411,6 +464,9 @@ function doHelp(subcommand) {
   }
   else if (subcommand === "getfiles") {
     usageGetFiles();
+  }
+  else if (subcommand === "getpubfiles") {
+    usageGetPublicFiles();
   }
   else {
     usageSubcommands();
@@ -432,8 +488,14 @@ async function main() {
     const res = await deleteFiles(argv.slice(2));
     console.log(JSON.stringify(res));
   }
-  else if (subcommand == "getfiles") {
+  else if (subcommand === "getfiles") {
     const res = await getFiles(argv.slice(2));
+    if (res !== undefined) {
+      console.log(JSON.stringify(res));
+    }
+  }
+  else if (subcommand === "getpubfiles") {
+    const res = await getPublicFiles(argv.slice(2));
     if (res !== undefined) {
       console.log(JSON.stringify(res));
     }
