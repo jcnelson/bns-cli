@@ -7,6 +7,9 @@ stacksConfig.logLevel = "none";
 
 const stacksAuth = require("@stacks/auth");
 const stacksStorage = require("@stacks/storage");
+const stx = require("@stacks/transactions");
+const stacksProfile = require("@stacks/profile");
+const stacksEncryption = require("@stacks/encryption");
 
 const fs = require("node:fs");
 const Path = require("node:path");
@@ -17,6 +20,7 @@ const Storage = stacksStorage.Storage;
 
 let DEBUG = true;
 const DEFAULT_HUB = "https://hub.blockstack.org"
+const DEFAULT_NODE = "http://seed-0.mainnet.stacks.co:20443"
 
 function debug(msg) {
   if (DEBUG) {
@@ -24,6 +28,17 @@ function debug(msg) {
   }
 }
 
+const BURN_MAINNET = 'SP000000000000000000002Q6VF78';
+const BURN_TESTNET = 'ST000000000000000000002AMW42H';
+
+function getBurnAddress(mainnet) {
+  if (mainnet) {
+    return BURN_MAINNET;
+  }
+  else {
+    return BURN_TESTNET;
+  }
+}
 
 // argv: string[]: list of arguments to parse
 // opts: string: getopt(3)-style short options
@@ -89,10 +104,11 @@ function usagePutFiles() {
   console.error(
     `Usage: ${process.argv[1]} putfiles [options] path [path...]\n` +
     `Where [options] are:\n` +
-    '   -k, --privkey           (required) Hex-encoded private key. If - is passed, it will be read from stdin.\n' +
-    `   -h, --hub               Gaia hub write URL. Defaults to ${DEFAULT_HUB}\n` +
-    '   -p, --no-encrypt        Do not encrypt the files\n' +
-    '   -s, --no-sign           Do not sign the files.  Requires -p, --no-encrypt.' 
+    '   -a, --association-token TEXT  Gaia association token JWT\n' +
+    `   -h, --hub URL                 Gaia hub write URL. Defaults to ${DEFAULT_HUB}\n` +
+    '   -k, --privkey TEXT            (required) Hex-encoded private key. If - is passed, it will be read from stdin.\n' +
+    '   -p, --no-encrypt              Do not encrypt the files\n' +
+    '   -s, --no-sign                 Do not sign the files.  Requires -p, --no-encrypt.' 
   );
   process.exit(1);
 }
@@ -102,8 +118,9 @@ function usageListFiles() {
   console.error(
     `Usage: ${process.argv[1]} listfiles [options]\n` +
     `Where [options] are:\n` +
-    '   -k, --privkey           (required) Hex-encoded private key. If - is passed, it will be read from stdin.\n' +
-    `   -h, --hub               Gaia hub write URL. Defaults to ${DEFAULT_HUB}`
+    '   -a, --association-token TEXT  Gaia association token JWT\n' +
+    `   -h, --hub URL                 Gaia hub write URL. Defaults to ${DEFAULT_HUB}` +
+    '   -k, --privkey TEXT            (required) Hex-encoded private key. If - is passed, it will be read from stdin.\n'
   );
   process.exit(1);
 }
@@ -113,8 +130,9 @@ function usageDeleteFiles() {
   console.error(
     `Usage: ${process.argv[1]} deletefiles [options] name [name...] \n` +
     `Where [options] are:\n` +
-    '   -k, --privkey           (required) Hex-encoded private key. If - is passed, it will be read from stdin.\n' +
-    `   -h, --hub               Gaia hub write URL. Defaults to ${DEFAULT_HUB}`
+    '   -a, --association-token TEXT  Gaia association token JWT\n' +
+    '   -k, --privkey TEXT            (required) Hex-encoded private key. If - is passed, it will be read from stdin.\n' +
+    `   -h, --hub URL                 Gaia hub write URL. Defaults to ${DEFAULT_HUB}`
   );
   process.exit(1);
 }
@@ -124,8 +142,8 @@ function usageGetFiles() {
   console.error(
     `Usage: ${process.argv[1]} getfiles [options] name path [name path...]\n` +
     `Where [options] are:\n` +
-    '   -k, --privkey           Hex-encoded private key. If - is passed, it will be read from stdin.\n' +
-    `   -h, --hub               Gaia hub write URL. Defaults to ${DEFAULT_HUB}\n` +
+    '   -k, --privkey TEXT      Hex-encoded private key. If - is passed, it will be read from stdin.\n' +
+    `   -h, --hub URL           Gaia hub write URL. Defaults to ${DEFAULT_HUB}\n` + 
     '   -p, --not-encrypted     File is plaintext, so do not try to decrypt it.\n' +
     '   -q, --quiet             Do not print a report (use with a `path` of -)\n' +
     '   -s, --not-signed        File is not signed, so do not try to verify it.\n' +
@@ -139,12 +157,38 @@ function usageGetPublicFiles() {
   console.error(
     `Usage: ${process.argv[1]} getpubfiles [options] name path [name path...]\n` +
     `Where [options] are:\n` +
-    '   -a, --app-url           URL to the application.\n' +
-    '   -b, --bns-name          BNS name of the file creator.\n' +
+    '   -a, --app-url URL       URL to the application.\n' +
+    '   -b, --bns-name NAME     BNS name of the file creator.\n' +
+    '   -k, --privkey TEXT      Private key to use to decrypt a file, if needed.\n' +
+    `   -n, --node URL          Stacks node RPC to contact. Defaults to ${DEFAULT_NODE}\n` +
     '   -p, --not-encrypted     File is plaintext, so do not try to decrypt it.\n' +
     '   -q, --quiet             Do not print a report (use with a `path` of -)\n' +
     '   -s, --not-signed        File is not signed, so do not try to verify it.\n' +
+    '   -t, --testnet           Query against a testnet node.\n' +
     'If `path` is -, then the file is written to stdout. At most one path may be -.'
+  );
+  process.exit(1);
+}
+
+// Print usage for getprofiles
+function usageGetProfiles() {
+  console.error(
+    `Usage: ${process.argv[1]} getprofiles [options] bns_name [bns_name...]\n` +
+    `Where [options] are:\n` +
+    `   -n, --node URL          Stacks node RPC to contact. Defaults to ${DEFAULT_NODE}\n` +
+    '   -t, --testnet           Query against a testnet node.\n'
+  );
+  process.exit(1);
+}
+
+// Print usage for getzonefiles
+function usageGetZonefiles() {
+  console.error(
+    `Usage: ${process.argv[1]} getzonefiles [options] bns_name [bns_name...]\n` +
+    `Where [options] are:\n` +
+    `   -n, --node URL          Stacks node RPC to contact. Defaults to ${DEFAULT_NODE}\n` +
+    '   -r, --raw               Write downloaded zone file data directly to stdout.\n' +
+    '   -t, --testnet           Query against a testnet node.\n'
   );
   process.exit(1);
 }
@@ -154,11 +198,19 @@ function usageSubcommands() {
   console.error(
     `Usage: ${process.argv[1]} subcommand [options] args...\n` +
     `Where \`subcommand\` is any of the following:\n` +
-    `   getfiles                Download files from the Gaia hub.\n` +
-    `   putfiles                Upload files to the Gaia hub.\n` +
-    `   listfiles               List files in the Gaia hub.\n` +
-    `   deletefiles             Delete files in the Gaia hub.\n` +
-    `   help                    Print this message.\n` +
+    `  BNS:\n` +
+    `    getprofiles             Look up other users' BNS name info.\n` +
+    `    getzonefiles            Look up other users' BNS zonefiles.\n` +
+    `\n` +
+    `  Storage:\n` +
+    `    getfiles                Download your private files from your Gaia hub.\n` +
+    `    getpubfiles             Download files from another user's Gaia hub.\n` +
+    `    listfiles               List files in the Gaia hub.\n` +
+    `    putfiles                Upload files to the Gaia hub.\n` +
+    `    deletefiles             Delete files in the Gaia hub.\n` +
+    `\n` +
+    `  Internal:\n` +
+    `    help                    Print this message.\n` +
     `For detailed subcommand usage, run \`${process.argv[1]} help subcommand\``
   );
   process.exit(1);
@@ -167,20 +219,25 @@ function usageSubcommands() {
 function getPrivateKey(privkey) {
   if (privkey === '-') {
     const privkey = fs.readFileSync(0, { encoding: 'utf8' });
-    return privkey;
+    return privkey.trim();
   }
   else {
     return privkey;
   }
 }
 
-function makeStorage(privateKey, hubUrl) {
+function makeStorage(privateKey, hubUrl, associationToken) {
   const appConfig = new AppConfig();
   const userSession = new UserSession({ appConfig });
-  userSession.store.getSessionData().userData = {
+  let userData = {
     appPrivateKey: privateKey,
-    hubUrl: hubUrl
+    hubUrl: hubUrl,
   };
+  if (associationToken) {
+    userData.associationToken = associationToken;
+  }
+
+  userSession.store.getSessionData().userData = userData;
 
   const storage = new Storage({ userSession });
   return storage;
@@ -188,7 +245,8 @@ function makeStorage(privateKey, hubUrl) {
 
 // Stores a list of files
 async function putFiles(argv) {
-  const opts = getCLIOpts(argv, "k:h:ps", {
+  const opts = getCLIOpts(argv, "a:k:h:ps", {
+    "a": "association-token",
     "k": "privkey",
     "h": "hub",
     "p": "no-encrypt",
@@ -202,13 +260,14 @@ async function putFiles(argv) {
     opts['h'] = DEFAULT_HUB;
   }
 
+  const associationToken = opts['a']
   const privateKey = getPrivateKey(opts['k']);
   const hubUrl = opts['h'];
   const encrypt = !opts['p'];
   const sign = !opts['s'];
   const fileNames = opts['_'];
 
-  const storage = makeStorage(privateKey, hubUrl);
+  const storage = makeStorage(privateKey, hubUrl, associationToken);
   const putFileOpts = {
     encrypt: encrypt,
     sign: sign
@@ -230,7 +289,8 @@ async function putFiles(argv) {
 
 // Lists files
 async function listFiles(argv) {
-  const opts = getCLIOpts(argv, "k:h:", {
+  const opts = getCLIOpts(argv, "a:k:h:", {
+    "a": "association-token",
     "k": "privkey",
     "h": "hub",
   });
@@ -242,10 +302,11 @@ async function listFiles(argv) {
     opts['h'] = DEFAULT_HUB;
   }
 
+  const associationToken = opts['a']
   const privateKey = getPrivateKey(opts['k']);
   const hubUrl = opts['h'];
   
-  const storage = makeStorage(privateKey, hubUrl);
+  const storage = makeStorage(privateKey, hubUrl, associationToken);
 
   let names = [];
   await storage.listFiles((filename) => {
@@ -262,7 +323,8 @@ async function listFiles(argv) {
 
 // Delete files
 async function deleteFiles(argv) {
-  const opts = getCLIOpts(argv, "k:h:", {
+  const opts = getCLIOpts(argv, "a:k:h:", {
+    "a": "association-token",
     "k": "privkey",
     "h": "hub",
   });
@@ -274,11 +336,12 @@ async function deleteFiles(argv) {
     opts['h'] = DEFAULT_HUB;
   }
 
+  const associationToken = opts['a']
   const privateKey = getPrivateKey(opts['k']);
   const hubUrl = opts['h'];
   const names = opts['_'];
   
-  const storage = makeStorage(privateKey, hubUrl);
+  const storage = makeStorage(privateKey, hubUrl, associationToken);
 
   for (const name of names) {
     try {
@@ -304,7 +367,7 @@ async function deleteFiles(argv) {
 }
 
 // Inner get files
-async function innerGetFiles(argv, storage, names_and_paths, getFileOpts, usage) {
+async function innerGetFiles(argv, names_and_paths, quiet, getFileOpts, getFileFunc, usage) {
   if (names_and_paths.length % 2 != 0) {
     usage(argv);
   }
@@ -336,7 +399,7 @@ async function innerGetFiles(argv, storage, names_and_paths, getFileOpts, usage)
   for(let i = 0; i < names.length; i++) {
     const name = names[i];
     const path = paths[i];
-    const data = await storage.getFile(name, getFileOpts);
+    const data = await getFileFunc(name, getFileOpts)
     if (data === undefined) {
       continue;
     }
@@ -405,7 +468,7 @@ async function getFiles(argv) {
   const hubUrl = opts['h'];
   const decrypt = !opts['p'];
   const verify = !opts['s'];
-  let quiet = opts['q'];
+  const quiet = opts['q'];
 
   const names_and_paths = opts['_'];
   
@@ -413,43 +476,517 @@ async function getFiles(argv) {
   const getFileOpts = {
     decrypt: decrypt,
     verify: verify,
+    storage: storage
+  };
+  const getFileFunc = async function(name, opts) {
+    const storage = opts.storage;
+    try {
+      const content = storage.getFile(name, opts);
+      return content;
+    }
+    catch (error) {
+      console.error(error);
+      return undefined;
+    }
   };
 
-  return innerGetFiles(argv, storage, names_and_paths, getFileOpts, usageGetFiles);
+  const content = await innerGetFiles(argv, names_and_paths, quiet, getFileOpts, getFileFunc, usageGetFiles); 
+  return content;
+}
+
+// Call a read-only function 
+async function readOnlyContractCall(node, contract_addr, contract_name, function_name, function_args, mainnet) {
+  const url = `${node}/v2/contracts/call-read/${contract_addr}/${contract_name}/${function_name}`;
+  const body = {
+    sender: getBurnAddress(mainnet),
+    arguments: function_args.map(function(arg) {
+      return stx.serializeCV(arg).toString('hex')
+    })
+  };
+
+  let res;
+  let data;
+
+  try {
+    res = await fetch(url, {
+      method: 'post',
+      body: JSON.stringify(body),
+      headers: { 'content-type': 'application/json' }
+    });
+  }
+  catch(error) {
+    console.error(error);
+    return undefined;
+  }
+
+  try {
+    data = await res.json();
+  }
+  catch(error) {
+    console.error(error);
+    return undefined;
+  }
+
+  const encodedCV = data.result;
+  return stx.deserializeCV(encodedCV);
+}
+
+// Resolve a name to its owner address and zone file hash
+async function resolveName(bnsName, node, mainnet) {
+  if (bnsName.indexOf(".") < 0) {
+    throw new Error("Invalid BNS name: missing '.'");
+  }
+  const parts = bnsName.split(".");
+  if (parts.length !== 2) {
+    throw new Error("Invalid BNS name: multiple '.'");
+  }
+  const name = parts[0];
+  const namespace = parts[1];
+
+  const args = [
+    stx.bufferCV(Buffer.from(namespace)),
+    stx.bufferCV(Buffer.from(name))
+  ];
+  let res = await readOnlyContractCall(node, getBurnAddress(mainnet), "bns", "name-resolve", args, mainnet);
+  res = stx.cvToJSON(res);
+
+  if (res["success"]) {
+    res = {
+      "lease_ending_at": res.value.value['lease-ending-at'].value.value,
+      "lease_started_at": res.value.value['lease-started-at'].value,
+      "owner": res.value.value['owner'].value,
+      "zonefile_hash": res.value.value['zonefile-hash'].value.slice(2)
+    }
+  }
+  else {
+    res = {
+      "error": "Failed to resolve BNS name",
+      "code": parseInt(res.value.value)
+    }
+  }
+  return res;
+}
+
+// Get the zone file for a BNS name
+async function getNameZonefile(bnsName, node, mainnet, nameProps) {
+  if (!nameProps) {
+    const props = await resolveName(bnsName, node, mainnet);
+    if (props.error) {
+      return props;
+    }
+    nameProps = props;
+  }
+
+  const zonefileUrl = `${node}/v2/attachments/${nameProps.zonefile_hash}`;
+  
+  let zonefileHexData;
+  try {
+    const res = await fetch(zonefileUrl);
+    zonefileHexData = await res.json();
+  }
+  catch (error) {
+    console.error(error);
+    return undefined;
+  }
+
+  let zonefileData;
+  try {
+    zonefileData = Buffer.from(zonefileHexData, 'hex')
+  }
+  catch (error) {
+    console.error(error);
+    return undefined;
+  }
+
+  return zonefileData;
+}
+
+// Get the profile by way of obtaining the zone file from the given node
+async function getNameProfile(bnsName, node, mainnet) {
+  const props = await resolveName(bnsName, node, mainnet);
+  if (props.error) {
+    return props;
+  }
+  const zonefileDataBin = await getNameZonefile(bnsName, node, mainnet, props);
+  if (zonefileDataBin === undefined) {
+    const ret = {
+      'error': 'Failed to obtain zonefile for BNS name'
+    };
+    return ret;
+  }
+
+  let zonefileData;
+  try {
+    zonefileData = zonefileDataBin.toString('utf8');
+  }
+  catch (error) {
+    console.error(error);
+    return undefined;
+  }
+
+  let profile;
+  try {
+    profile = await stacksProfile.resolveZoneFileToProfile(zonefileData, props.owner, fetch);
+  }
+  catch (error) {
+    console.error(error);
+    return undefined;
+  }
+
+  const rec = {
+    "name": props,
+    "zonefileData": zonefileData,
+    "profile": profile
+  }
+  return rec;
+}
+
+// Get the URL to a file, given a profile
+function getFileURL(profile, appOrigin, filename) {
+  let bucketUrl = undefined;
+  if (profile.hasOwnProperty('apps')) {
+    if (profile.apps.hasOwnProperty(appOrigin)) {
+      const url = profile.apps[appOrigin];
+      const bucket = url.replace(/\/?(\?|#|$)/, '/$1');
+      bucketUrl = `${bucket}${filename}`;
+    }
+  }
+  return bucketUrl
+}
+
+// Get the owner address of a public file
+function getOwnerAddress(profile, appOrigin) {
+  if (profile.hasOwnProperty('apps')) {
+    if (profile.apps.hasOwnProperty(appOrigin)) {
+      const url = profile.apps[appOrigin];
+      const matches = url.match(/([13][a-km-zA-HJ-NP-Z0-9]{26,35})/);
+      if (!matches) {
+        throw new Error('Failed to parse gaia address');
+      }
+      return matches[matches.length - 1];
+    }
+  }
+  return undefined;
+}
+
+// Go get a public file
+async function getPublicFileData(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`getFile ${url} failed`);
+  }
+  let contentType = response.headers.get('Content-Type');
+  if (typeof contentType === 'string') {
+    contentType = contentType.toLowerCase();
+  }
+  if (
+    contentType === null ||
+    contentType.startsWith('text') ||
+    contentType.startsWith('application/json')
+  ) {
+    return response.text();
+  } else {
+    return response.arrayBuffer();
+  }
+}
+
+// Decrypt an unsigned file
+async function decryptFile(fileData, privateKey) {
+  const appConfig = new AppConfig();
+  const userSession = new UserSession({ appConfig });
+  userSession.store.getSessionData().userData = {
+    appPrivateKey: privateKey,
+  };
+
+  if (typeof privateKey === 'string') {
+    const decryptOpt = { privateKey };
+    const content = await userSession.decryptContent(fileData, decryptOpt);
+    return content;
+  } else {
+    const content = await userSession.decryptContent(fileData);
+    return content;
+  }
+}
+
+// Decrypt a signed file
+async function decryptSignedFile(fileData, privateKey, ownerAddress) {
+  let sigObject;
+  try {
+    sigObject = JSON.parse(fileData);
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      throw new Error(
+        'Failed to parse signature content JSON '
+      );
+    } else {
+      throw err;
+    }
+  }
+
+  const signature = sigObject.signature;
+  const signerPublicKey = sigObject.publicKey;
+  const cipherText = sigObject.cipherText;
+  const signerAddress = stacksEncryption.publicKeyToAddress(signerPublicKey);
+
+  const appConfig = new AppConfig();
+  const userSession = new UserSession({ appConfig });
+  userSession.store.getSessionData().userData = {
+    appPrivateKey: privateKey,
+  };
+
+  if (!signerPublicKey || !cipherText || !signature) {
+    throw new Error(
+      'Failed to get signature verification data from file:' + ` ${path}`
+    );
+  } else if (signerAddress !== ownerAddress) {
+    throw new Error(
+      `Signer pubkey address (${signerAddress}) doesn't` + ` match gaia address (${ownerAddress})`
+    );
+  } else if (!stacksEncryption.verifyECDSA(cipherText, signerPublicKey, signature)) {
+    throw new SignatureVerificationError(
+      'Contents do not match ECDSA signature in file:' + ` ${path}`
+    );
+  } else if (typeof privateKey === 'string') {
+    const decryptOpt = { privateKey };
+    const content = await userSession.decryptContent(cipherText, decryptOpt);
+    return content;
+  } else {
+    const content = userSession.decryptContent(cipherText);
+    return content;
+  }
+}
+
+// Verify a signed file with a separate sigFile.
+// Not necessary for encrypted+signed files
+async function verifyFile(fileData, sigFile, ownerAddress) {
+    let signature;
+    let publicKey;
+    try {
+      const sigObject = JSON.parse(sigFile);
+      signature = sigObject.signature;
+      publicKey = sigObject.publicKey;
+    } catch (err) {
+      if (err instanceof SyntaxError) {
+        throw new Error(
+          'Failed to parse signature content JSON ' +
+            `(path: ${path}${SIGNATURE_FILE_SUFFIX})` +
+            ' The content may be corrupted.'
+        );
+      } else {
+        throw err;
+      }
+    }
+    const signerAddress = stacksEncryption.publicKeyToAddress(publicKey);
+    if (ownerAddress !== signerAddress) {
+      throw new Error(
+        `Signer pubkey address (${signerAddress}) doesn't` +
+          ` match owner address (${ownerAddress})`
+      );
+    } else if (!stacksEncryption.verifyECDSA(fileData, publicKey, signature)) {
+      throw new Error(
+        'Contents do not match ECDSA signature'
+      );
+    } else {
+      return true;
+    }
+}
+
+// Go get a public file, and decrypt and/or verify it.
+// * if decrypt is true, then privateKey is necessary
+// * if verify is true, then ownerAddress is necessary
+async function getAndDecodePublicFile(fileUrl, privateKey, ownerAddress, decrypt, verify) {
+  const fileData = await getPublicFileData(fileUrl);
+  if (verify && decrypt) {
+    if (!privateKey || !ownerAddress) {
+      throw new Error("Need privateKey and ownerAddress");
+    }
+    const content = await decryptSignedFile(fileData, privateKey, ownerAddress);
+    return content;
+  }
+  else if (verify && !decrypt) {
+    if (!privateKey) {
+      throw new Error("Need privateKey");
+    }
+    const sigData = await getPublicFileData(`${fileUrl}.sig`);
+    if (!verifyFile(fileData, sigData, ownerAddress)) {
+      throw new Error(`Verification error: failed to verify ${fileUrl} with ${ownerAddress}`);
+    }
+    return fileData;
+  }
+  else if (!verify && decrypt) {
+    if (!ownerAddress) {
+      throw new Error("Need ownerAddress");
+    }
+    const content = await decryptFile(fileData, privateKey);
+    return content;
+  }
+  else {
+    return fileData;
+  }
 }
 
 // Get public files
 async function getPublicFiles(argv) {
-  const opts = getCLIOpts(argv, "a:b:psq", {
+  const opts = getCLIOpts(argv, "a:b:n:k:psqt", {
     "b": "bns-name",
     "a": "app-url",
+    "k": "privateKey",
+    "n": "node",
     "p": "not-encrypted",
     "s": "not-signed",
-    "q": "quiet"
+    "q": "quiet",
+    "t": "testnet"
   });
 
-  if (opts['b'] === null || opts['a'] === null) {
+  if (opts['b'] === null) {
+    console.error("Missing -b");
     usageGetPublicFiles();
+  }
+
+  if (opts['a'] === null) {
+    console.error("Missing -a");
+    usageGetPublicFiles();
+  }
+
+  if (opts['n'] === null) {
+    opts['n'] = DEFAULT_NODE;
   }
 
   const username = opts['b'];
   const app_url = opts['a'];
   const decrypt = !opts['p'];
   const verify = !opts['s'];
-  let quiet = opts['q'];
+  const node = opts['n'];
+  const quiet = opts['q'];
+  const privateKey = getPrivateKey(opts['k']);
+  const mainnet = !opts['t']
 
   const names_and_paths = opts['_'];
-  
-  const fakePrivateKey = '24fd0d173db8ecaaefa3c8f589cf49fe72bc4ec54fc1bdc84023eac69d7ccc0b';
-  const storage = makeStorage(fakePrivateKey, DEFAULT_HUB);
+
+  const profile = await getNameProfile(username, node, mainnet);
+  if (!profile) {
+    const ret = {
+      'error': 'Failed to get name profile'
+    };
+    return ret;
+  }
+
   const getFileOpts = {
     username: username,
     app: app_url,
     decrypt: decrypt,
     verify: verify,
+    profile: profile,
+    privateKey: privateKey,
   };
-  
-  return innerGetFiles(argv, storage, names_and_paths, getFileOpts, usageGetPublicFiles);
+  const getFileFunc = async function(name, opts) {
+    const fileUrl = getFileUrl(opts.profile, opts.app, name);
+    if (!fileUrl) {
+      return undefined;
+    }
+    const ownerAddress = opts.profile.name.owner;
+    const privateKey = opts.privateKey;
+    try {
+      const content = await getAndDecodePublicFile(fileUrl, privateKey, ownerAddress, decrypt, verify);
+      return content;
+    }
+    catch (error) {
+      console.error(error);
+      return undefined;
+    }
+  };
+  const content = await innerGetFiles(argv, names_and_paths, quiet, getFileOpts, getFileFunc, usageGetPublicFiles); 
+  return content;
+}
+
+// Get someone's BNS name info, zonefile, and profile
+async function getProfiles(argv) {
+  const opts = getCLIOpts(argv, "n:t", {
+    "n": "node",
+    "t": "testnet"
+  });
+
+  if (opts['n'] === null) {
+    opts['n'] = DEFAULT_NODE;
+  }
+  const mainnet = !opts['t'];
+  const node = opts['n'];
+
+  if (opts['_'].length === 0) {
+    usageGetProfiles();
+  }
+
+  const names = opts['_'];
+  let ret = [];
+  for (let name of names) {
+    try {
+      const profile = await getNameProfile(name, node, mainnet);
+      ret.push(profile);
+    }
+    catch (error) {
+      console.error(error);
+      ret.push({'error': 'Failed to load profile'});
+    }
+  }
+  return ret;
+}
+
+// Get someone's BNS zone file, optionally dumping it directly to stdout
+async function getZonefiles(argv) {
+  const opts = getCLIOpts(argv, "n:tr", {
+    "n": "node",
+    "t": "testnet",
+    "r": "raw"
+  });
+
+  if (opts['n'] === null) {
+    opts['n'] = DEFAULT_NODE;
+  }
+  const mainnet = !opts['t'];
+  const node = opts['n'];
+  const raw = opts['r'];
+
+  if (opts['_'].length === 0) {
+    usageGetZonefiles();
+  }
+  const names = opts['_'];
+
+  let ret = [];
+  for (let name of names) {
+    try {
+      const zonefileRaw = await getNameZonefile(name, node, mainnet);
+      if (raw) {
+        // send to stdout
+        if (zonefileRaw instanceof ArrayBuffer) {
+          fs.writeFileSync(1, Buffer.from(new Uint8Array(zonefileRaw)));
+        }
+        else {
+          fs.writeFileSync(1, zonefileRaw);
+        }
+      }
+      else {
+        let zonefileData;
+        try {
+          zonefileData = zonefileRaw.toString('utf8');
+          ret.push(zonefileData);
+        }
+        catch (error) {
+          console.error(error);
+          ret.push({'error': 'Failed to decode zone file'});
+        }
+      }
+    }
+    catch (error) {
+      console.error(error);
+    }
+  }
+
+  if (raw) {
+    return undefined;
+  }
+  else {
+    return ret;
+  }
 }
 
 function doHelp(subcommand) {
@@ -467,6 +1004,9 @@ function doHelp(subcommand) {
   }
   else if (subcommand === "getpubfiles") {
     usageGetPublicFiles();
+  }
+  else if (subcommand === "getprofiles") {
+    usageGetProfiles();
   }
   else {
     usageSubcommands();
@@ -500,9 +1040,75 @@ async function main() {
       console.log(JSON.stringify(res));
     }
   }
-  else if (subcommand == "help") {
+  else if (subcommand === "getprofiles") {
+    const res = await getProfiles(argv.slice(2));
+    if (res !== undefined) {
+      console.log(JSON.stringify(res));
+    }
+  }
+  else if (subcommand === "getzonefiles") {
+    const res = await getZonefiles(argv.slice(2));
+    if (res !== undefined) {
+      console.log(JSON.stringify(res))
+    }
+  }
+  else if (subcommand === "test") {
+    test_all();
+  }
+  else {
     doHelp(argv[2]);
   }
 }
 
 main()
+
+//////////////////////////////////////////////////////////////////////////////////////////////////
+
+function assert(stmt, msg) {
+  if (!stmt) {
+    throw new Error(`Assertion failed: ${stmt}`);
+  }
+}
+
+function assert_eq(stmt1, stmt2) {
+  if (stmt1 !== stmt2) {
+    throw new Error(`Assertion failed\nleft: ${JSON.stringify(stmt1)}\nright: ${JSON.stringify(stmt2)}`);
+  }
+}
+
+async function test_all() {
+  const tests = [
+    testDecryptFile,
+    testDecryptSignedFile,
+    testVerifyFile,
+  ];
+  for (let test of tests) {
+    console.log(test);
+    test();
+  }
+}
+
+async function testDecryptFile() {
+  const fileData = '{"iv":"5c5d94212f4bc8ee37520c93385661b3","ephemeralPK":"036f0be4909b9968efe2fcd248bd0ad20286dd6be00ff07294f223852b1b7b0078","cipherText":"99005f64aefdd257c6f77968207e72d0b3727e4c26f33dfde1b62c58a529ffe1","mac":"bbea9d9812eab6fb44b118797229c4286d156f85428eb53cd32971dcaca97a3d","wasString":true}';
+  const privateKey = "896adae13a1bf88db0b2ec94339b62382ec6f34cd7e2ff8abae7ec271e05f9d8";
+
+  const res = await decryptFile(fileData, privateKey);
+  assert_eq(res, '{"hello":"world","num":1}');
+}
+
+async function testDecryptSignedFile() {
+  const fileData = '{"signature":"304402203bce9975e7bb18b9e18b9255ac0a51b2eac8f1105ee02ec0909b78d4b1a47e5202205cc75326967038ac352143ef8d0fd568b110365899db584455dec7b229ea92ff","publicKey":"0228e13cf7eb13b5e8cf6a36b02ad0f40811170d4c2acda796891e69df3491a6e0","cipherText":"{\\"iv\\":\\"1e8510452bbce1e38dd7103f4e8bcd1e\\",\\"ephemeralPK\\":\\"0230da643065bf36b0a86685097bd87dbc1a8b685c2f8f30dbdb4d286e53d71d49\\",\\"cipherText\\":\\"014c8a2e2d6c18a2990c0d6f54d3e48b\\",\\"mac\\":\\"bfc7120d92a254cf393b1a0443960e6bcc6667ee8c90d29592df139a1385b179\\",\\"wasString\\":false}"}';
+  const ownerAddress = '1BGZdvFwEQDkt3gVqzMMyQ6R688HQMHHyH';
+  const privateKey = "896adae13a1bf88db0b2ec94339b62382ec6f34cd7e2ff8abae7ec271e05f9d8";
+
+  const res = await decryptSignedFile(fileData, privateKey, ownerAddress);
+  assert(res.compare(Buffer.from('hello world\n')) === 0, "got bad file data");
+}
+
+async function testVerifyFile() {
+  const sigData = '{"signature":"304402201cd7e882b335445945ee095909928cf73283f419945ff83b514d4a162775bf9802204789dc271096ca4f86c4fceaa76405df00ff6278223979789c03e8edca3293a4","publicKey":"0228e13cf7eb13b5e8cf6a36b02ad0f40811170d4c2acda796891e69df3491a6e0"}';
+  const fileData = 'hello world\n';
+  const ownerAddress = '1BGZdvFwEQDkt3gVqzMMyQ6R688HQMHHyH';
+  const res = verifyFile(fileData, sigData, ownerAddress);
+  assert(res, "Failed to verify signature");
+}
