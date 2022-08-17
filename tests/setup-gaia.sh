@@ -1,13 +1,39 @@
 #!/bin/bash
 
-STORAGE_ROOT="$1"
+CLEAR_STORAGE="0"
+STORAGE_ROOT=""
+
+while true; do
+   ARG="$1"
+   if [ -z "$ARG" ]; then
+      break;
+   fi
+
+   if [ "$ARG" = "-f" ]; then
+      CLEAR_STORAGE="1";
+   else
+      STORAGE_ROOT="$ARG"
+   fi
+   shift 1
+done
+
 if [ -z "$STORAGE_ROOT" ]; then 
-   echo >&2 "Usage: $0 /path/to/storage/root"
+   echo >&2 "Usage: $0 [-f] /path/to/storage/root"
    exit 1
 fi
-   
+
 set -uoe pipefail
 
+if [ -d "$STORAGE_ROOT" ]; then
+   if [ "$CLEAR_STORAGE" = "1" ]; then
+       rm -rf "$STORAGE_ROOT"
+   else 
+      echo >&2 "Directory exists: '$STORAGE_ROOT'"
+      echo >&2 "Pass -f to override."
+      exit 1
+   fi
+fi
+ 
 if ! [ -d "$STORAGE_ROOT" ]; then
    mkdir -p "$STORAGE_ROOT" || exit 1
 fi
