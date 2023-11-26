@@ -2,13 +2,13 @@
 
 set -uoe pipefail
 
-GAIA_CLI="../gaia-cli"
+BNS_CLI="../bns-cli"
 HUB_URL="http://localhost:3000"
 STORAGE_ROOT="/tmp/gaia-storage"
 TEST_ROOT_PREFIX="/tmp/gaia-storage-test"
 
-function get_gaia_cli_path() {
-   echo "$GAIA_CLI"
+function get_bns_cli_path() {
+   echo "$BNS_CLI"
 }
 
 function get_gaia_hub_url() {

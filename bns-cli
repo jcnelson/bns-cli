@@ -1120,6 +1120,42 @@ async function getZonefiles(argv) {
   }
 }
 
+// Get someone's BNS name record
+async function getNameRecords(argv) {
+  const opts = getCLIOpts(argv, "n:tr", {
+    "n": "node",
+    "t": "testnet",
+  });
+
+  if (opts['n'] === null) {
+    opts['n'] = DEFAULT_NODE;
+  }
+  const mainnet = !opts['t'];
+  const node = opts['n'];
+  const raw = opts['r'];
+
+  if (opts['_'].length === 0) {
+    usageGetZonefiles();
+  }
+  const names = opts['_'];
+
+  let ret = [];
+  for (let name of names) {
+    try {
+      const namerec = await resolveName(name, node, mainnet);
+      ret.push({
+        "name": name,
+        "record": namerec
+      });
+    }
+    catch (error) {
+      console.error(error);
+    }
+  }
+
+  return ret;
+}
+
 // Decode a Gaia-stored file
 async function decodeFile(argv) {
   const opts = getCLIOpts(argv, "k:o:ps", {
@@ -1178,6 +1214,9 @@ function doHelp(subcommand) {
   else if (subcommand === "getprofiles") {
     usageGetProfiles();
   }
+  else if (subcommand === "getzonefiles") {
+    usageGetZonefiles();
+  }
   else {
     usageSubcommands();
   }
@@ -1222,11 +1261,20 @@ async function main() {
       console.log(JSON.stringify(res));
     }
   }
+  else if (subcommand === "getnames") {
+    const res = await getNameRecords(argv.slice(2));
+    if (res !== undefined) {
+      console.log(JSON.stringify(res));
+    }
+  }
   else if (subcommand === "decodefile") {
     const res = await decodeFile(argv.slice(2));
     if (res !== undefined) {
       console.log(JSON.stringify(res));
     }
+  }
+  else if (subcommand === "help") {
+    doHelp(argv[3]);
   }
   else {
     doHelp(argv[2]);

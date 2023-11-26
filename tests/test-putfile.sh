@@ -2,7 +2,7 @@
 
 source ./subr.sh
 
-gaia_cli="$(get_gaia_cli_path)"
+bns_cli="$(get_bns_cli_path)"
 hub_url="$(get_gaia_hub_url)"
 gaia_storage_root="$(get_storage_root)"
 test_storage="$(setup_test_storage test_putfile)"
@@ -26,10 +26,10 @@ function init() {
 function test_plaintext_putfile() {
    echo "plaintext putfile" > "$test_storage/test_plaintext_putfile"
 
-   "$gaia_cli" putfiles -h "$hub_url" -k "$privkey" -p -s a "$test_storage/test_plaintext_putfile"
+   "$bns_cli" putfiles -h "$hub_url" -k "$privkey" -p -s a "$test_storage/test_plaintext_putfile"
 
    test -f "$gaia_storage_root/$addr/a" || \
-      abort "test_plaintext_putfile: did not create file '$filename' at $gaia_storage_root/$addr/a"
+      abort "test_plaintext_putfile: did not create file 'a' at $gaia_storage_root/$addr/a"
 
    # file contents are the same
    cmp "$gaia_storage_root/$addr/a" "$test_storage/test_plaintext_putfile" || \
@@ -41,10 +41,10 @@ function test_plaintext_putfile() {
 function test_plaintext_putfile_gaia_auth() {
    echo "plaintext putfile gaia auth" > "$test_storage/test_plaintext_putfile_gaia_auth"
 
-   "$gaia_cli" putfiles -h "$hub_url" -g "$gaia_auth" -p -s ag "$test_storage/test_plaintext_putfile_gaia_auth"
+   "$bns_cli" putfiles -h "$hub_url" -g "$gaia_auth" -p -s ag "$test_storage/test_plaintext_putfile_gaia_auth"
 
    test -f "$gaia_storage_root/$gaia_auth_addr/ag" || \
-      abort "test_plaintext_putfile_gaia_auth: did not create file '$filename' at $gaia_storage_root/$gaia_auth_addr/a"
+      abort "test_plaintext_putfile_gaia_auth: did not create file 'ag' at $gaia_storage_root/$gaia_auth_addr/a"
 
    # file contents are the same
    cmp "$gaia_storage_root/$gaia_auth_addr/ag" "$test_storage/test_plaintext_putfile_gaia_auth" || \
@@ -56,7 +56,7 @@ function test_plaintext_putfile_gaia_auth() {
 function test_plaintext_signed_putfile() {
    echo "plaintext signed putfile" > "$test_storage/test_plaintext_signed_putfile"
 
-   "$gaia_cli" putfiles -h "$hub_url" -k "$privkey" -p b "$test_storage/test_plaintext_signed_putfile"
+   "$bns_cli" putfiles -h "$hub_url" -k "$privkey" -p b "$test_storage/test_plaintext_signed_putfile"
 
    test -f "$gaia_storage_root/$addr/b" ||
       abort "test_plaintext_signed_putfile: did not create file 'b' at $gaia_storage_root/$addr/b"
@@ -70,7 +70,7 @@ function test_plaintext_signed_putfile() {
       abort "test_plaintext_signed_putfile: no such file: $gaia_storage_root/$addr/b.sig"
 
    # signature is valid
-   "$gaia_cli" decodefile -k "$privkey" -o "$addr" -p "$gaia_storage_root/$addr/b" "$gaia_storage_root/$addr/b.sig" > "$test_storage/test_plaintext_signed_putfile.decoded"
+   "$bns_cli" decodefile -k "$privkey" -o "$addr" -p "$gaia_storage_root/$addr/b" "$gaia_storage_root/$addr/b.sig" > "$test_storage/test_plaintext_signed_putfile.decoded"
    cmp "$test_storage/test_plaintext_signed_putfile" "$test_storage/test_plaintext_signed_putfile.decoded" ||
       abort "test_plaintext_signed_putfile: could not verify signature"
 
@@ -80,7 +80,7 @@ function test_plaintext_signed_putfile() {
 function test_signed_encrypted_putfile() {
    echo "signed encrypted putfile" > "$test_storage/test_signed_encrypted_putfile"
 
-   "$gaia_cli" putfiles -h "$hub_url" -k "$privkey" c "$test_storage/test_signed_encrypted_putfile"
+   "$bns_cli" putfiles -h "$hub_url" -k "$privkey" c "$test_storage/test_signed_encrypted_putfile"
 
    test -f "$gaia_storage_root/$addr/c" ||
       abort "test_signed_encrypted_putfile: did not create file 'c' at $gaia_storage_root/$addr/c"
@@ -90,7 +90,7 @@ function test_signed_encrypted_putfile() {
       abort "test_signed_encrypted_putfile: no such file: $gaia_storage_root/$addr/c"
    
    # file decodes
-   "$gaia_cli" decodefile -k "$privkey" -o "$addr" "$gaia_storage_root/$addr/c" > "$test_storage/test_signed_encrypted_putfile.decoded"
+   "$bns_cli" decodefile -k "$privkey" -o "$addr" "$gaia_storage_root/$addr/c" > "$test_storage/test_signed_encrypted_putfile.decoded"
    cmp "$test_storage/test_signed_encrypted_putfile" "$test_storage/test_signed_encrypted_putfile.decoded" ||
       abort "test_signed_encrypted_putfile: could not verify signature and/or decode file"
 

@@ -1,2 +1,2 @@
-# gaia-cli
-Gaia storage swiss-army knife
+# bns-cli
+BNS swiss-army knife
